@@ -64,21 +64,34 @@ type vaultGetter interface {
 
 type realCredentialClient struct {
 	cred *dvls.EntryCredentialService
+	mu   *sync.Mutex
+}
+
+func (r *realCredentialClient) lock() func() {
+	if r.mu == nil {
+		return func() {}
+	}
+	r.mu.Lock()
+	return r.mu.Unlock
 }
 
 func (r *realCredentialClient) GetByID(ctx context.Context, vaultID, entryID string) (dvls.Entry, error) {
+	defer r.lock()()
 	return r.cred.GetByIdWithContext(ctx, vaultID, entryID)
 }
 
 func (r *realCredentialClient) GetEntries(ctx context.Context, vaultID string, opts dvls.GetEntriesOptions) ([]dvls.Entry, error) {
+	defer r.lock()()
 	return r.cred.GetEntriesWithContext(ctx, vaultID, opts)
 }
 
 func (r *realCredentialClient) Update(ctx context.Context, entry dvls.Entry) (dvls.Entry, error) {
+	defer r.lock()()
 	return r.cred.UpdateWithContext(ctx, entry)
 }
 
 func (r *realCredentialClient) DeleteByID(ctx context.Context, vaultID, entryID string) error {
+	defer r.lock()()
 	return r.cred.DeleteByIdWithContext(ctx, vaultID, entryID)
 }
 

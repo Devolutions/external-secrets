@@ -20,6 +20,7 @@ package dvls
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/Devolutions/go-dvls"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -30,9 +31,14 @@ import (
 
 type realVaultClient struct {
 	vaults *dvls.Vaults
+	mu     *sync.Mutex
 }
 
 func (r *realVaultClient) GetByName(ctx context.Context, name string) (dvls.Vault, error) {
+	if r.mu != nil {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+	}
 	return r.vaults.GetByNameWithContext(ctx, name)
 }
 
@@ -52,12 +58,13 @@ func NewDVLSClient(ctx context.Context, kube kclient.Client, storeKind, namespac
 		return nil, "", fmt.Errorf("failed to get appSecret: %w", err)
 	}
 
-	client, err := dvls.NewClient(appID, appSecret, provider.ServerURL)
+	shared, err := getSharedClient(provider.ServerURL, appID, appSecret)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create DVLS client: %w", err)
 	}
+	client := shared.client
 
-	credClient := &realCredentialClient{cred: client.Entries.Credential}
+	credClient := &realCredentialClient{cred: client.Entries.Credential, mu: &shared.mu}
 
 	// When vault is empty, the provider operates in legacy mode where
 	// the vault ID is expected in the secret key (<vault-id>/<entry-id>).
@@ -65,7 +72,7 @@ func NewDVLSClient(ctx context.Context, kube kclient.Client, storeKind, namespac
 		return credClient, "", nil
 	}
 
-	vaultCl := &realVaultClient{vaults: client.Vaults}
+	vaultCl := &realVaultClient{vaults: client.Vaults, mu: &shared.mu}
 	vaultID, err := resolveVaultRef(ctx, provider.Vault, vaultCl)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to resolve vault: %w", err)
